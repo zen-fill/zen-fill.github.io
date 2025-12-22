@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zen Fill Pro</title>
+    <title>Zen Fill Pro - Physics Edition</title>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000" crossorigin="anonymous"></script>
     <script>
       window.adsbygoogle = window.adsbygoogle || [];
@@ -12,30 +12,31 @@
     </script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: 'Segoe UI', sans-serif; color: white; touch-action: none; }
-        #ui-overlay { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.9); width: 100%; height: 100%; z-index: 50; }
+        #ui-overlay { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); width: 100%; height: 100%; z-index: 50; }
         .ui-content { text-align: center; width: 90%; max-width: 400px; }
         h1 { font-size: 50px; color: #00ffff; text-shadow: 0 0 20px #00ffff; margin-bottom: 20px; }
         input { padding: 15px; font-size: 18px; border-radius: 5px; border: 2px solid #00ffff; background: #111; color: white; text-align: center; margin-bottom: 20px; width: 80%; }
-        button { padding: 18px; font-size: 20px; background: #00ffff; border: none; cursor: pointer; border-radius: 50px; font-weight: bold; width: 85%; transition: 0.3s; color: black; }
+        button { padding: 18px; font-size: 18px; background: #00ffff; border: none; cursor: pointer; border-radius: 50px; font-weight: bold; width: 85%; transition: 0.3s; color: black; margin-bottom: 10px; }
         button:hover { background: #fff; transform: scale(1.05); }
-        #score-box { position: absolute; top: 20px; left: 20px; color: #00ffff; font-size: 24px; font-weight: bold; font-family: monospace; }
+        .secondary-btn { background: #333; color: white; border: 1px solid #00ffff; }
+        #score-box { position: absolute; top: 20px; left: 20px; color: #00ffff; font-size: 24px; font-weight: bold; font-family: monospace; z-index: 10; }
         
-        /* Loading Screen Styles */
         #ad-loading { display: none; position: absolute; z-index: 100; background: #000; width: 100%; height: 100%; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
         .loader { border: 5px solid #333; border-top: 5px solid #00ffff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 15px; }
         #timer-text { font-size: 14px; color: #777; margin-top: 10px; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        canvas { display: block; max-width: 100vw; max-height: 100vh; }
+        canvas { display: block; width: 100vmin; height: 100vmin; border: 1px solid #222; }
     </style>
 </head>
 <body>
 
-    <div id="score-box">0</div>
+    <div id="score-box">0 / 1500</div>
     
     <div id="ad-loading">
         <div class="loader"></div>
-        <p id="loading-status">LOADING INTERACTIVE AD...</p>
-        <p id="timer-text">Game will start in 4s...</p>
+        <p id="loading-status">INITIALIZING SYSTEMS...</p>
+        <p id="timer-text">Connecting to Ad Server (6s)...</p>
+        <button id="skip-ad-btn" style="display:none; width: auto;" onclick="startGame()">PLAY FOR FREE</button>
     </div>
 
     <div id="ui-overlay">
@@ -44,151 +45,247 @@
             <input type="text" id="player-name" placeholder="ENTER NAME">
             <button onclick="requestAd('reward')">WATCH AD TO PLAY</button>
         </div>
+
         <div id="end-screen" class="ui-content" style="display:none;">
-            <h1 id="nice-msg">NICE</h1>
+            <h1 id="nice-msg">BLAST!</h1>
             <button onclick="location.reload()">PLAY AGAIN</button>
         </div>
+
         <div id="pause-screen" class="ui-content" style="display:none;">
             <h1>PAUSED</h1>
-            <button onclick="resumeGame()">RESUME</button>
+            <button onclick="resumeGame()">CONTINUE</button>
+            <button class="secondary-btn" onclick="location.reload()">RESTART</button>
         </div>
     </div>
 
     <canvas id="canvas"></canvas>
 
 <script>
-    // --- AUDIO SYSTEM ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 800; canvas.height = 800;
+
+    let balls = [];
+    let rotation = 0;
+    let isRunning = false;
+    let isBlasted = false;
+    let gameStarted = false;
+    let wakeLock = null;
+    
+    const speed = 4.5;
+    const ballRad = 5;
+    const ringRad = 350;
+    const target = 1500;
+
+    // --- SOUND SYSTEM ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSfx(f, t='sine', d=0.05, s=false) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-        o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
-        if(s) o.frequency.exponentialRampToValueAtTime(f*10, audioCtx.currentTime+d);
-        g.gain.setValueAtTime(0.04, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+d);
-        o.connect(g); g.connect(audioCtx.destination);
-        o.start(); o.stop(audioCtx.currentTime+d);
+        try {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+            if(s) o.frequency.exponentialRampToValueAtTime(f*0.1, audioCtx.currentTime+d);
+            g.gain.setValueAtTime(0.02, audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+d);
+            o.connect(g); g.connect(audioCtx.destination);
+            o.start(); o.stop(audioCtx.currentTime+d);
+        } catch(e){}
     }
 
-    // --- UPGRADED AD LOGIC WITH 4s TIMEOUT ---
-    let gameStarted = false;
+    // --- WAKE LOCK (Keep Screen On) ---
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (err) { console.log("WakeLock failed"); }
+    }
 
+    // --- VISIBILITY / TAB CHANGE ---
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden && isRunning) {
+            pauseGame();
+        }
+    });
+
+    // --- AD LOGIC ---
     function requestAd(type) {
-        if (gameStarted) return;
-        
         const loadingDiv = document.getElementById('ad-loading');
         const timerText = document.getElementById('timer-text');
+        const skipBtn = document.getElementById('skip-ad-btn');
         loadingDiv.style.display = 'flex';
         
-        let timeLeft = 4;
-        
-        // The Countdown Timer
+        let timeLeft = 6;
         let countdown = setInterval(() => {
             timeLeft--;
-            timerText.innerText = "Game will start in " + timeLeft + "s...";
-            if (timeLeft <= 0) {
-                clearInterval(countdown);
-                if (!gameStarted) {
-                    console.log("Ad timeout: Starting game.");
-                    startGame();
-                }
-            }
+            timerText.innerText = "Connecting to Ad Server (" + timeLeft + "s)...";
+            if (timeLeft <= 3) skipBtn.style.display = "block";
+            if (timeLeft <= 0) clearInterval(countdown);
         }, 1000);
 
-        // Google Ad Call
         adBreak({
             type: type,
-            name: type === 'reward' ? 'start_game' : 'next_level',
+            name: 'game_start',
             beforeReward: (show) => { show(); },
             adViewed: () => { clearInterval(countdown); startGame(); },
             adDismissed: () => { clearInterval(countdown); startGame(); },
-            adBreakDone: (info) => { 
-                clearInterval(countdown);
-                if (!gameStarted) startGame();
-            }
+            adBreakDone: () => { clearInterval(countdown); if (!gameStarted) startGame(); }
         });
     }
 
-    // --- GAME ENGINE ---
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = 600; canvas.height = 600;
-    
-    let balls = [], rotation = 0, isRunning = false, pName = "";
-    const speed = 5.75, ballRad = 6, ringRad = 280, target = 1250;
+    // --- PHYSICS ENGINE ---
+    function resolveCollision(b1, b2) {
+        const dx = b2.x - b1.x;
+        const dy = b2.y - b1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < ballRad * 2) {
+            // Static resolution (prevent overlap)
+            const overlap = (ballRad * 2 - distance) / 2;
+            const nx = dx / distance;
+            const ny = dy / distance;
+            b1.x -= nx * overlap;
+            b1.y -= ny * overlap;
+            b2.x += nx * overlap;
+            b2.y += ny * overlap;
+
+            // Elastic collision velocity
+            const v1n = b1.vx * nx + b1.vy * ny;
+            const v2n = b2.vx * nx + b2.vy * ny;
+
+            // Swap normal velocities
+            const v1nAfter = v2n;
+            const v2nAfter = v1n;
+
+            b1.vx += (v1nAfter - v1n) * nx;
+            b1.vy += (v1nAfter - v1n) * ny;
+            b2.vx += (v2nAfter - v2n) * nx;
+            b2.vy += (v2nAfter - v2n) * ny;
+            
+            if (Math.random() < 0.05) playSfx(800 + Math.random()*400, 'sine', 0.01);
+        }
+    }
 
     function startGame() {
         if (gameStarted) return;
         gameStarted = true;
-        
-        pName = document.getElementById('player-name').value || "GUEST";
+        requestWakeLock();
         document.getElementById('ad-loading').style.display = 'none';
         document.getElementById('ui-overlay').style.display = 'none';
-        
         if (balls.length === 0) {
-            balls.push({x:300, y:250, vx:speed, vy:0, color:'#00ffff', inside:true});
+            balls.push({x:400, y:300, vx:speed, vy:speed, color:'#00ffff', inside:true});
         }
         isRunning = true;
-        animate();
+        requestAnimationFrame(animate);
+    }
+
+    function pauseGame() {
+        isRunning = false;
+        document.getElementById('ui-overlay').style.display = 'flex';
+        document.getElementById('pause-screen').style.display = 'block';
+    }
+
+    function resumeGame() {
+        document.getElementById('ui-overlay').style.display = 'none';
+        document.getElementById('pause-screen').style.display = 'none';
+        isRunning = true;
+        requestAnimationFrame(animate);
     }
 
     function animate() {
-        if(!isRunning) return;
-        ctx.fillStyle = 'black'; ctx.fillRect(0,0,600,600);
-        rotation += 0.015;
+        if(!isRunning && !isBlasted) return;
+        ctx.fillStyle = 'black'; ctx.fillRect(0,0,800,800);
         
-        let count = 0;
+        if(!isBlasted) rotation += 0.015;
+
+        let activeCount = 0;
+
+        // Collision Loop (Marbles)
+        for (let i = 0; i < balls.length; i++) {
+            for (let j = i + 1; j < balls.length; j++) {
+                if (balls[i].inside && balls[j].inside) {
+                    resolveCollision(balls[i], balls[j]);
+                }
+            }
+        }
+
         for(let i=balls.length-1; i>=0; i--) {
             let b = balls[i];
             b.x += b.vx; b.y += b.vy;
-            let d = Math.sqrt((b.x-300)**2 + (b.y-300)**2);
+            let d = Math.sqrt((b.x-400)**2 + (b.y-400)**2);
             
-            if (b.inside && d + ballRad > ringRad) {
-                let ang = Math.atan2(b.y-300, b.x-300);
+            if (!isBlasted && b.inside && d + ballRad > ringRad) {
+                let ang = Math.atan2(b.y-400, b.x-400);
                 let rel = (ang - rotation) % (Math.PI*2);
                 if(rel < 0) rel += Math.PI*2;
+                
+                // Gap logic
                 if(rel > 0.25) {
-                    let nx = (b.x-300)/d, ny = (b.y-300)/d;
+                    let nx = (b.x-400)/d, ny = (b.y-400)/d;
                     let dot = b.vx*nx + b.vy*ny;
                     b.vx -= 2*dot*nx; b.vy -= 2*dot*ny;
-                    if(Math.random() < 0.1) playSfx(600, 'sine', 0.02);
                 } else {
                     b.inside = false;
-                    playSfx(100, 'square', 0.3, true);
+                    playSfx(150, 'square', 0.2, true);
                     spawn();
                 }
             }
-            let s = Math.sqrt(b.vx**2 + b.vy**2);
-            b.vx = (b.vx/s)*speed; b.vy = (b.vy/s)*speed;
 
-            if(b.inside) count++;
+            if(b.inside) activeCount++;
             ctx.fillStyle = b.inside ? b.color : 'rgba(255,255,255,0.1)';
             ctx.beginPath(); ctx.arc(b.x, b.y, ballRad, 0, Math.PI*2); ctx.fill();
-            if (b.y > 1000 || b.y < -400) balls.splice(i,1);
+            
+            if (b.y > 1200 || b.y < -400 || b.x > 1200 || b.x < -400) balls.splice(i,1);
         }
 
-        ctx.beginPath(); ctx.arc(300, 300, ringRad, rotation + 0.25, rotation + Math.PI*2);
-        ctx.strokeStyle = 'white'; ctx.lineWidth = 5; ctx.stroke();
-        document.getElementById('score-box').innerText = count;
+        // Draw Ring
+        if (!isBlasted) {
+            ctx.beginPath(); 
+            ctx.arc(400, 400, ringRad, rotation + 0.25, rotation + Math.PI*2);
+            ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 5; ctx.stroke();
+        }
 
-        if (count >= target) { isRunning = false; finish(); }
-        else { requestAnimationFrame(animate); }
+        document.getElementById('score-box').innerText = activeCount + " / " + target;
+
+        if (activeCount >= target && !isBlasted) {
+            triggerBlast();
+        }
+
+        requestAnimationFrame(animate);
     }
 
     function spawn() {
         const colors = ['#00ffff', '#ff00ff', '#00ffaa', '#ffff00', '#ffffff'];
         const c = colors[Math.floor(Math.random()*colors.length)];
-        for(let i=0; i<2; i++) {
+        // Random "Luck" factor - computer spawns 1 to 3 balls randomly
+        const luck = Math.floor(Math.random() * 3) + 1;
+        for(let i=0; i<luck; i++) {
             let a = Math.random()*Math.PI*2;
-            balls.push({x:300, y:300, vx:Math.cos(a)*speed, vy:Math.sin(a)*speed, color:c, inside:true});
+            balls.push({
+                x:400 + (Math.random()-0.5)*20, 
+                y:400 + (Math.random()-0.5)*20, 
+                vx:Math.cos(a)*speed, 
+                vy:Math.sin(a)*speed, 
+                color:c, 
+                inside:true
+            });
         }
     }
 
-    function finish() {
-        document.getElementById('nice-msg').innerText = "NICE " + pName.toUpperCase();
-        document.getElementById('ui-overlay').style.display = 'flex';
-        document.getElementById('end-screen').style.display = 'block';
-        adBreak({ type: 'next', name: 'restart' });
+    function triggerBlast() {
+        isBlasted = true;
+        playSfx(50, 'sawtooth', 0.8, true);
+        balls.forEach(b => {
+            let ang = Math.atan2(b.y-400, b.x-400);
+            let force = 5 + Math.random() * 10;
+            b.vx = Math.cos(ang) * force;
+            b.vy = Math.sin(ang) * force;
+        });
+        
+        setTimeout(() => {
+            document.getElementById('ui-overlay').style.display = 'flex';
+            document.getElementById('end-screen').style.display = 'block';
+        }, 2000);
     }
 </script>
 </body>
