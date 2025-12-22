@@ -20,7 +20,6 @@
         button:hover { background: #fff; transform: scale(1.05); }
         .secondary-btn { background: #333; color: white; border: 1px solid #00ffff; }
         #score-box { position: absolute; top: 20px; left: 20px; color: #00ffff; font-size: 24px; font-weight: bold; font-family: monospace; z-index: 10; }
-        
         #ad-loading { display: none; position: absolute; z-index: 100; background: #000; width: 100%; height: 100%; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
         .loader { border: 5px solid #333; border-top: 5px solid #00ffff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 15px; }
         #timer-text { font-size: 14px; color: #777; margin-top: 10px; }
@@ -30,7 +29,7 @@
 </head>
 <body>
 
-    <div id="score-box">0 / 1500</div>
+    <div id="score-box">0 / Loading...</div>
     
     <div id="ad-loading">
         <div class="loader"></div>
@@ -45,12 +44,10 @@
             <input type="text" id="player-name" placeholder="ENTER NAME">
             <button onclick="requestAd('reward')">WATCH AD TO PLAY</button>
         </div>
-
         <div id="end-screen" class="ui-content" style="display:none;">
             <h1 id="nice-msg">BLAST!</h1>
             <button onclick="location.reload()">PLAY AGAIN</button>
         </div>
-
         <div id="pause-screen" class="ui-content" style="display:none;">
             <h1>PAUSED</h1>
             <button onclick="resumeGame()">CONTINUE</button>
@@ -61,6 +58,13 @@
     <canvas id="canvas"></canvas>
 
 <script>
+    // 1. ADAPTIVE CONFIGURATION (SET ONLY ONCE)
+    const isMobile = window.innerWidth < 768;
+    const speed = 4.5;
+    const ballRad = isMobile ? 12 : 6; 
+    const target = isMobile ? 750 : 1500; 
+    const ringRad = 350;
+
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 800; canvas.height = 800;
@@ -71,11 +75,9 @@
     let isBlasted = false;
     let gameStarted = false;
     let wakeLock = null;
-    
-    const speed = 4.5;
-    const ballRad = 5;
-    const ringRad = 350;
-    const target = 1500;
+
+    // Set initial score display
+    document.getElementById('score-box').innerText = "0 / " + target;
 
     // --- SOUND SYSTEM ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -92,35 +94,32 @@
         } catch(e){}
     }
 
-    // --- WAKE LOCK (Keep Screen On) ---
+    // --- WAKE LOCK ---
     async function requestWakeLock() {
-        try {
-            if ('wakeLock' in navigator) {
-                wakeLock = await navigator.wakeLock.request('screen');
-            }
-        } catch (err) { console.log("WakeLock failed"); }
+        try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
     }
 
-    // --- VISIBILITY / TAB CHANGE ---
-    document.addEventListener("visibilitychange", () => {
-        if (document.hidden && isRunning) {
-            pauseGame();
-        }
-    });
+    // --- TAB CHANGE DETECTION ---
+    document.addEventListener("visibilitychange", () => { if (document.hidden && isRunning) pauseGame(); });
 
-    // --- AD LOGIC ---
+    // --- AD LOGIC (FIXED 6s TIMER) ---
     function requestAd(type) {
         const loadingDiv = document.getElementById('ad-loading');
         const timerText = document.getElementById('timer-text');
         const skipBtn = document.getElementById('skip-ad-btn');
         loadingDiv.style.display = 'flex';
+        skipBtn.style.display = 'none';
         
         let timeLeft = 6;
         let countdown = setInterval(() => {
             timeLeft--;
-            timerText.innerText = "Connecting to Ad Server (" + timeLeft + "s)...";
-            if (timeLeft <= 3) skipBtn.style.display = "block";
-            if (timeLeft <= 0) clearInterval(countdown);
+            if (timeLeft > 0) {
+                timerText.innerText = "Connecting to Ad Server (" + timeLeft + "s)...";
+            } else {
+                timerText.innerText = "Ad server not responding...";
+                skipBtn.style.display = "block"; 
+                clearInterval(countdown);
+            }
         }, 1000);
 
         adBreak({
@@ -133,36 +132,20 @@
         });
     }
 
-    // --- PHYSICS ENGINE ---
+    // --- PHYSICS (MARBLE STYLE) ---
     function resolveCollision(b1, b2) {
         const dx = b2.x - b1.x;
         const dy = b2.y - b1.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-
         if (distance < ballRad * 2) {
-            // Static resolution (prevent overlap)
             const overlap = (ballRad * 2 - distance) / 2;
-            const nx = dx / distance;
-            const ny = dy / distance;
-            b1.x -= nx * overlap;
-            b1.y -= ny * overlap;
-            b2.x += nx * overlap;
-            b2.y += ny * overlap;
-
-            // Elastic collision velocity
+            const nx = dx / (distance || 1), ny = dy / (distance || 1);
+            b1.x -= nx * overlap; b1.y -= ny * overlap;
+            b2.x += nx * overlap; b2.y += ny * overlap;
             const v1n = b1.vx * nx + b1.vy * ny;
             const v2n = b2.vx * nx + b2.vy * ny;
-
-            // Swap normal velocities
-            const v1nAfter = v2n;
-            const v2nAfter = v1n;
-
-            b1.vx += (v1nAfter - v1n) * nx;
-            b1.vy += (v1nAfter - v1n) * ny;
-            b2.vx += (v2nAfter - v2n) * nx;
-            b2.vy += (v2nAfter - v2n) * ny;
-            
-            if (Math.random() < 0.05) playSfx(800 + Math.random()*400, 'sine', 0.01);
+            b1.vx += (v2n - v1n) * nx; b1.vy += (v2n - v1n) * ny;
+            b2.vx += (v1n - v2n) * nx; b2.vy += (v1n - v2n) * ny;
         }
     }
 
@@ -172,9 +155,7 @@
         requestWakeLock();
         document.getElementById('ad-loading').style.display = 'none';
         document.getElementById('ui-overlay').style.display = 'none';
-        if (balls.length === 0) {
-            balls.push({x:400, y:300, vx:speed, vy:speed, color:'#00ffff', inside:true});
-        }
+        if (balls.length === 0) balls.push({x:400, y:300, vx:speed, vy:speed, color:'#00ffff', inside:true});
         isRunning = true;
         requestAnimationFrame(animate);
     }
@@ -183,6 +164,7 @@
         isRunning = false;
         document.getElementById('ui-overlay').style.display = 'flex';
         document.getElementById('pause-screen').style.display = 'block';
+        document.getElementById('entry-screen').style.display = 'none';
     }
 
     function resumeGame() {
@@ -195,35 +177,32 @@
     function animate() {
         if(!isRunning && !isBlasted) return;
         ctx.fillStyle = 'black'; ctx.fillRect(0,0,800,800);
-        
         if(!isBlasted) rotation += 0.015;
 
         let activeCount = 0;
 
-        // Collision Loop (Marbles)
         for (let i = 0; i < balls.length; i++) {
             for (let j = i + 1; j < balls.length; j++) {
-                if (balls[i].inside && balls[j].inside) {
-                    resolveCollision(balls[i], balls[j]);
-                }
+                if (balls[i].inside && balls[j].inside) resolveCollision(balls[i], balls[j]);
             }
         }
 
-        for(let i=balls.length-1; i>=0; i--) {
+        for(let i = balls.length - 1; i >= 0; i--) {
             let b = balls[i];
+            let mag = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+            if (mag !== 0) { b.vx = (b.vx / mag) * speed; b.vy = (b.vy / mag) * speed; }
+
             b.x += b.vx; b.y += b.vy;
-            let d = Math.sqrt((b.x-400)**2 + (b.y-400)**2);
+            let d = Math.sqrt((b.x - 400)**2 + (b.y - 400)**2);
             
             if (!isBlasted && b.inside && d + ballRad > ringRad) {
-                let ang = Math.atan2(b.y-400, b.x-400);
-                let rel = (ang - rotation) % (Math.PI*2);
-                if(rel < 0) rel += Math.PI*2;
-                
-                // Gap logic
+                let ang = Math.atan2(b.y - 400, b.x - 400);
+                let rel = (ang - rotation) % (Math.PI * 2);
+                if(rel < 0) rel += Math.PI * 2;
                 if(rel > 0.25) {
-                    let nx = (b.x-400)/d, ny = (b.y-400)/d;
-                    let dot = b.vx*nx + b.vy*ny;
-                    b.vx -= 2*dot*nx; b.vy -= 2*dot*ny;
+                    let nx = (b.x - 400) / d, ny = (b.y - 400) / d;
+                    let dot = b.vx * nx + b.vy * ny;
+                    b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
                 } else {
                     b.inside = false;
                     playSfx(150, 'square', 0.2, true);
@@ -233,41 +212,30 @@
 
             if(b.inside) activeCount++;
             ctx.fillStyle = b.inside ? b.color : 'rgba(255,255,255,0.1)';
-            ctx.beginPath(); ctx.arc(b.x, b.y, ballRad, 0, Math.PI*2); ctx.fill();
-            
-            if (b.y > 1200 || b.y < -400 || b.x > 1200 || b.x < -400) balls.splice(i,1);
+            ctx.beginPath(); ctx.arc(b.x, b.y, ballRad, 0, Math.PI * 2); ctx.fill();
+            if (b.y > 1200 || b.y < -400 || b.x > 1200 || b.x < -400) balls.splice(i, 1);
         }
 
-        // Draw Ring
         if (!isBlasted) {
-            ctx.beginPath(); 
-            ctx.arc(400, 400, ringRad, rotation + 0.25, rotation + Math.PI*2);
+            ctx.beginPath(); ctx.arc(400, 400, ringRad, rotation + 0.25, rotation + Math.PI * 2);
             ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 5; ctx.stroke();
         }
 
         document.getElementById('score-box').innerText = activeCount + " / " + target;
-
-        if (activeCount >= target && !isBlasted) {
-            triggerBlast();
-        }
-
+        if (activeCount >= target && !isBlasted) triggerBlast();
         requestAnimationFrame(animate);
     }
 
     function spawn() {
         const colors = ['#00ffff', '#ff00ff', '#00ffaa', '#ffff00', '#ffffff'];
         const c = colors[Math.floor(Math.random()*colors.length)];
-        // Random "Luck" factor - computer spawns 1 to 3 balls randomly
-        const luck = Math.floor(Math.random() * 3) + 1;
-        for(let i=0; i<luck; i++) {
-            let a = Math.random()*Math.PI*2;
+        const ballCount = Math.random() > 0.8 ? 3 : 2; 
+        for(let i=0; i < ballCount; i++) {
+            let a = Math.random() * Math.PI * 2;
             balls.push({
-                x:400 + (Math.random()-0.5)*20, 
-                y:400 + (Math.random()-0.5)*20, 
-                vx:Math.cos(a)*speed, 
-                vy:Math.sin(a)*speed, 
-                color:c, 
-                inside:true
+                x: 400 + (Math.random()-0.5)*10, y: 400 + (Math.random()-0.5)*10, 
+                vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, 
+                color: c, inside: true
             });
         }
     }
@@ -278,13 +246,12 @@
         balls.forEach(b => {
             let ang = Math.atan2(b.y-400, b.x-400);
             let force = 5 + Math.random() * 10;
-            b.vx = Math.cos(ang) * force;
-            b.vy = Math.sin(ang) * force;
+            b.vx = Math.cos(ang) * force; b.vy = Math.sin(ang) * force;
         });
-        
         setTimeout(() => {
             document.getElementById('ui-overlay').style.display = 'flex';
             document.getElementById('end-screen').style.display = 'block';
+            document.getElementById('pause-screen').style.display = 'none';
         }, 2000);
     }
 </script>
