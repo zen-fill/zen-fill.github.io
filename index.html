@@ -134,20 +134,39 @@
 
     // --- PHYSICS (MARBLE STYLE) ---
     function resolveCollision(b1, b2) {
-        const dx = b2.x - b1.x;
-        const dy = b2.y - b1.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance < ballRad * 2) {
-            const overlap = (ballRad * 2 - distance) / 2;
-            const nx = dx / (distance || 1), ny = dy / (distance || 1);
-            b1.x -= nx * overlap; b1.y -= ny * overlap;
-            b2.x += nx * overlap; b2.y += ny * overlap;
-            const v1n = b1.vx * nx + b1.vy * ny;
-            const v2n = b2.vx * nx + b2.vy * ny;
-            b1.vx += (v2n - v1n) * nx; b1.vy += (v2n - v1n) * ny;
-            b2.vx += (v1n - v2n) * nx; b2.vy += (v1n - v2n) * ny;
+    const dx = b2.x - b1.x;
+    const dy = b2.y - b1.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Dynamic check based on current ball size
+    if (distance < ballRad * 2 && distance > 0) {
+        // --- POSITION PROJECTION (The Pressure Fix) ---
+        // Calculate how much they are overlapping
+        const overlap = (ballRad * 2 - distance) / 2;
+        const nx = dx / distance;
+        const ny = dy / distance;
+
+        // Physically push them apart so they don't stay "stuck"
+        b1.x -= nx * overlap;
+        b1.y -= ny * overlap;
+        b2.x += nx * overlap;
+        b2.y += ny * overlap;
+
+        // --- VELOCITY RESOLUTION ---
+        // Normal velocity components
+        const v1n = b1.vx * nx + b1.vy * ny;
+        const v2n = b2.vx * nx + b2.vy * ny;
+
+        // Perfect elastic bounce
+        const vDiff = v1n - v2n;
+        if (vDiff > 0) {
+            b1.vx -= vDiff * nx;
+            b1.vy -= vDiff * ny;
+            b2.vx += vDiff * nx;
+            b2.vy += vDiff * ny;
         }
     }
+}
 
     function startGame() {
         if (gameStarted) return;
@@ -175,56 +194,90 @@
     }
 
     function animate() {
-        if(!isRunning && !isBlasted) return;
-        ctx.fillStyle = 'black'; ctx.fillRect(0,0,800,800);
-        if(!isBlasted) rotation += 0.015;
+    if(!isRunning && !isBlasted) return;
+    
+    // Clear Canvas
+    ctx.fillStyle = 'black'; 
+    ctx.fillRect(0, 0, 800, 800);
+    
+    if(!isBlasted) rotation += 0.015;
 
-        let activeCount = 0;
+    let activeCount = 0;
 
-        for (let i = 0; i < balls.length; i++) {
-            for (let j = i + 1; j < balls.length; j++) {
-                if (balls[i].inside && balls[j].inside) resolveCollision(balls[i], balls[j]);
+    // 1. Resolve Ball-to-Ball Collisions
+    for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+            if (balls[i].inside && balls[j].inside) {
+                resolveCollision(balls[i], balls[j]);
             }
         }
-
-        for(let i = balls.length - 1; i >= 0; i--) {
-            let b = balls[i];
-            let mag = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-            if (mag !== 0) { b.vx = (b.vx / mag) * speed; b.vy = (b.vy / mag) * speed; }
-
-            b.x += b.vx; b.y += b.vy;
-            let d = Math.sqrt((b.x - 400)**2 + (b.y - 400)**2);
-            
-            if (!isBlasted && b.inside && d + ballRad > ringRad) {
-                let ang = Math.atan2(b.y - 400, b.x - 400);
-                let rel = (ang - rotation) % (Math.PI * 2);
-                if(rel < 0) rel += Math.PI * 2;
-                if(rel > 0.25) {
-                    let nx = (b.x - 400) / d, ny = (b.y - 400) / d;
-                    let dot = b.vx * nx + b.vy * ny;
-                    b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
-                } else {
-                    b.inside = false;
-                    playSfx(150, 'square', 0.2, true);
-                    spawn();
-                }
-            }
-
-            if(b.inside) activeCount++;
-            ctx.fillStyle = b.inside ? b.color : 'rgba(255,255,255,0.1)';
-            ctx.beginPath(); ctx.arc(b.x, b.y, ballRad, 0, Math.PI * 2); ctx.fill();
-            if (b.y > 1200 || b.y < -400 || b.x > 1200 || b.x < -400) balls.splice(i, 1);
-        }
-
-        if (!isBlasted) {
-            ctx.beginPath(); ctx.arc(400, 400, ringRad, rotation + 0.25, rotation + Math.PI * 2);
-            ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 5; ctx.stroke();
-        }
-
-        document.getElementById('score-box').innerText = activeCount + " / " + target;
-        if (activeCount >= target && !isBlasted) triggerBlast();
-        requestAnimationFrame(animate);
     }
+
+    // 2. Update Position, Speed, and Ring Collision
+    for(let i = balls.length - 1; i >= 0; i--) {
+        let b = balls[i];
+        
+        // FORCE UNIFORM SPEED
+        let magnitude = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+        if (magnitude !== 0) {
+            b.vx = (b.vx / magnitude) * speed;
+            b.vy = (b.vy / magnitude) * speed;
+        }
+
+        b.x += b.vx; 
+        b.y += b.vy;
+
+        // --- HARD BOUNDARY DETECTION ---
+        let d = Math.sqrt((b.x - 400)**2 + (b.y - 400)**2);
+        
+        if (!isBlasted && b.inside && d + ballRad > ringRad) {
+            let ang = Math.atan2(b.y - 400, b.x - 400);
+            let rel = (ang - rotation) % (Math.PI * 2);
+            if(rel < 0) rel += Math.PI * 2;
+            
+            if(rel > 0.25) {
+                // REFLECT: Change velocity
+                let nx = (b.x - 400) / d, ny = (b.y - 400) / d;
+                let dot = b.vx * nx + b.vy * ny;
+                b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny;
+
+                // HARD SNAP: Physically move ball inside the border
+                // This stops the "soft" border effect
+                b.x = 400 + nx * (ringRad - ballRad);
+                b.y = 400 + ny * (ringRad - ballRad);
+            } else {
+                // EXIT: Ball goes through the gap
+                b.inside = false;
+                playSfx(150, 'square', 0.2, true);
+                spawn();
+            }
+        }
+
+        // 3. Draw Section
+        if(b.inside) activeCount++;
+        ctx.fillStyle = b.inside ? b.color : 'rgba(255,255,255,0.1)';
+        ctx.beginPath(); 
+        ctx.arc(b.x, b.y, ballRad, 0, Math.PI * 2); 
+        ctx.fill();
+        
+        // Cleanup off-screen
+        if (b.y > 1200 || b.y < -400 || b.x > 1200 || b.x < -400) balls.splice(i, 1);
+    }
+
+    // 4. Draw Ring
+    if (!isBlasted) {
+        ctx.beginPath(); 
+        ctx.arc(400, 400, ringRad, rotation + 0.25, rotation + Math.PI * 2);
+        ctx.strokeStyle = '#00ffff'; 
+        ctx.lineWidth = 5; 
+        ctx.stroke();
+    }
+
+    document.getElementById('score-box').innerText = activeCount + " / " + target;
+    if (activeCount >= target && !isBlasted) triggerBlast();
+    
+    requestAnimationFrame(animate);
+}
 
     function spawn() {
         const colors = ['#00ffff', '#ff00ff', '#00ffaa', '#ffff00', '#ffffff'];
