@@ -1,4 +1,173 @@
-<script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zen Fill Pro - Physics Edition</title>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-0000000000000000" crossorigin="anonymous"></script>
+    <script>
+      window.adsbygoogle = window.adsbygoogle || [];
+      var adBreak = adConfig = function(o) { adsbygoogle.push(o); }
+      adConfig({ preloadAdBreaks: 'on' });
+    </script>
+<style>
+    body { margin: 0; background: #000; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: 'Segoe UI', sans-serif; color: white; touch-action: none; }
+    
+    /* THE FIX: Simplified Controls */
+    #controls { 
+        position: fixed !important; 
+        top: 20px !important; 
+        right: 20px !important; 
+        display: none; /* Controlled by JS */
+        flex-direction: column; 
+        align-items: flex-end; 
+        z-index: 10000 !important; 
+    }
+
+    #menu-toggle { 
+        width: 50px; 
+        height: 50px; 
+        background: rgba(0, 0, 0, 0.8); 
+        border: 2px solid #00ffff; 
+        color: #00ffff; 
+        font-size: 28px; 
+        border-radius: 10px; 
+        cursor: pointer; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        backdrop-filter: blur(5px);
+    }
+
+    #menu-content { 
+        display: none; 
+        flex-direction: column; 
+        gap: 10px; 
+        background: rgba(0, 0, 0, 0.9); 
+        padding: 15px; 
+        border-radius: 12px; 
+        border: 1px solid #00ffff; 
+        margin-top: 10px; 
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+    }
+
+    #menu-content button, #menu-content select { 
+        width: 130px; 
+        padding: 12px; 
+        background: transparent; 
+        border: 1px solid #00ffff; 
+        color: #00ffff; 
+        border-radius: 8px; 
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    /* Score Box Fix */
+    #score-box { 
+        position: absolute; 
+        top: 20px; 
+        left: 20px; 
+        color: #00ffff; 
+        font-size: clamp(16px, 4vw, 24px); 
+        font-weight: bold; 
+        font-family: monospace; 
+        z-index: 10; 
+        text-shadow: 0 0 10px #00ffff;
+    }
+
+    /* UI Screens */
+    #ui-overlay { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); width: 100%; height: 100%; z-index: 50; }
+    .ui-content { text-align: center; width: 90%; max-width: 400px; }
+    h1 { font-size: 50px; color: #00ffff; text-shadow: 0 0 20px #00ffff; margin-bottom: 20px; }
+    input { padding: 15px; font-size: 18px; border-radius: 5px; border: 2px solid #00ffff; background: #111; color: white; text-align: center; margin-bottom: 20px; width: 80%; }
+    
+    /* Main Buttons (Start/Play Again) */
+    .ui-content button { padding: 18px; font-size: 18px; background: #00ffff; border: none; cursor: pointer; border-radius: 50px; font-weight: bold; width: 85%; transition: 0.3s; color: black; margin-bottom: 10px; }
+
+    #ad-loading { display: none; position: absolute; z-index: 100; background: #000; width: 100%; height: 100%; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
+    .loader { border: 5px solid #333; border-top: 5px solid #00ffff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    
+    canvas { display: block; width: 100vmin; height: 100vmin; border: 1px solid #222; z-index: 1; }
+    #skip-ad-btn {
+    display: none; 
+    width: auto !important;
+    padding: 12px 25px !important;
+    background: #00ffff !important;
+    color: #000 !important;
+    border-radius: 50px !important;
+    font-size: 16px !important;
+    font-weight: bold !important;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+    border: none;
+    margin-top: 20px;
+    animation: pulse 1.5s infinite; /* Makes it grab attention */
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); box-shadow: 0 0 25px rgba(0, 255, 255, 0.8); }
+    100% { transform: scale(1); }
+}
+#ad-loading p {
+    color: #777;
+    font-family: monospace;
+    letter-spacing: 1px;
+    margin: 5px 0;
+}
+
+#loading-status {
+    color: #00ffff !important;
+    font-weight: bold;
+    font-size: 18px;
+}
+</style>
+</head>
+<body>
+    <div id="controls">
+        <button id="menu-toggle" onclick="toggleMenu()">☰</button>
+        <div id="menu-content" style="display: none;">
+            <select id="speed-stepper" onchange="updateSpeed(this.value)">
+                <option value="3">Slow</option>
+                <option value="4.5" selected>Normal</option>
+                <option value="7">Fast</option>
+                <option value="12">Turbo</option>
+            </select>
+            <button onclick="toggleGame()" id="pause-btn">STOP</button>
+            <button onclick="confirmRestart()">RESTART</button>
+        </div>
+    </div>
+
+    <div id="score-box">0 / Loading...</div>
+    
+    <div id="ad-loading">
+        <div class="loader"></div>
+        <p id="loading-status">INITIALIZING SYSTEMS...</p>
+        <p id="timer-text">Connecting to Ad Server (6s)...</p>
+        <button id="skip-ad-btn" style="display:none; width: auto;" onclick="startGame()">PLAY FOR FREE</button>
+    </div>
+
+    <div id="ui-overlay">
+        <div id="entry-screen" class="ui-content">
+            <h1>ZEN FILL</h1>
+            <input type="text" id="player-name" placeholder="ENTER NAME">
+            <button onclick="requestAd('reward')">WATCH AD TO PLAY</button>
+        </div>
+        <div id="end-screen" class="ui-content" style="display:none;">
+            <h1 id="nice-msg">BLAST!</h1>
+            <button onclick="location.reload()">PLAY AGAIN</button>
+        </div>
+        <div id="pause-screen" class="ui-content" style="display:none;">
+            <h1>PAUSED</h1>
+            <button onclick="resumeGame()">CONTINUE</button>
+            <button class="secondary-btn" onclick="location.reload()">RESTART</button>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
         const isMobile = window.innerWidth < 768;
         let speed = isMobile ? 8.5 : 6.0; 
         const ballRad = isMobile ? 10 : 6; 
@@ -273,3 +442,5 @@
             if (confirm("Are you sure? This will reset your score!")) location.reload();
         }
     </script>
+</body>
+</html>
